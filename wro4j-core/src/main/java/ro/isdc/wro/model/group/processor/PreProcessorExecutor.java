@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import org.apache.commons.io.IOUtils;
@@ -47,7 +49,7 @@ public final class PreProcessorExecutor {
   private ResourceLocatorFactory resourceLocatorFactory;
   @Inject
   private ProcessorsFactory processorsFactory;
-
+  private ExecutorService executor;
 
   /**
    * Apply preProcessors on resources and merge them.
@@ -68,8 +70,6 @@ public final class PreProcessorExecutor {
     final boolean isParallel = Context.get().getConfig().isParallelPreprocessing();
     final int availableProcessors = Runtime.getRuntime().availableProcessors();
     if (isParallel && resources.size() > 1 && availableProcessors > 1) {
-      //use at most the number of available processors (true parallelism)
-      final int threadPoolSize = availableProcessors;
 
       final List<Callable<String>> callables = new ArrayList<Callable<String>>();
       for (final Resource resource : resources) {
@@ -80,7 +80,11 @@ public final class PreProcessorExecutor {
           }
         });
       }
-      final List<Future<String>> futures = WroUtil.runInParallel(callables, threadPoolSize);
+      final ExecutorService exec = getExecutorService();
+      final List<Future<String>> futures = new ArrayList<Future<String>>();
+      for (final Callable<String> callable : callables) {
+        futures.add(exec.submit(callable));
+      }
 
       for (final Future<String> future : futures) {
         try {
@@ -104,6 +108,16 @@ public final class PreProcessorExecutor {
       }
     }
     return result.toString();
+  }
+
+  private ExecutorService getExecutorService() {
+    if (executor == null) {
+      // use at most the number of available processors (true parallelism)
+      final int threadPoolSize = Runtime.getRuntime().availableProcessors();
+      executor = Executors.newFixedThreadPool(threadPoolSize,
+        WroUtil.createDaemonThreadFactory("parallelPreprocessing"));
+    }
+    return executor;
   }
 
 
